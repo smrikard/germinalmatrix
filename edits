@@ -1,0 +1,629 @@
+package retina;
+
+import java.io.File;
+import java.io.FileNotFoundException;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Scanner;
+import java.util.Set;
+
+import repast.simphony.context.Context;
+import repast.simphony.context.DefaultContext;
+import repast.simphony.context.space.grid.GridFactory;
+import repast.simphony.context.space.grid.GridFactoryFinder;
+import repast.simphony.engine.environment.RunEnvironment;
+import repast.simphony.engine.schedule.ScheduledMethod;
+import repast.simphony.parameter.Parameters;
+import repast.simphony.query.space.grid.MooreQuery;
+import repast.simphony.random.RandomHelper;
+import repast.simphony.space.grid.Grid;
+import repast.simphony.space.grid.GridBuilderParameters;
+import repast.simphony.space.grid.GridPoint;
+import repast.simphony.space.grid.SimpleGridAdder;
+import repast.simphony.space.grid.WrapAroundBorders;
+import repast.simphony.valueLayer.GridValueLayer;
+import repast.simphony.valueLayer.IGridValueLayer;
+import repast.simphony.valueLayer.ValueLayerDiffuser;
+
+public class AngioContextBuilder extends DefaultContext<Object> {
+
+	private ValueLayerDiffuser diffuser;
+	private GridValueLayer vegf;
+	private int EcCount;
+	private int PcCount;
+	public static GridPoint destination;
+	public static EndothelialCell origin;
+	
+
+	public AngioContextBuilder() {
+		super("AngioContextBuilder");
+		
+		AngioContextBuilder.destination = null;
+		AngioContextBuilder.origin = null;
+
+		GridFactory gridFactory = GridFactoryFinder.createGridFactory(null);
+		Grid<Object> grid = gridFactory.createGrid("grid", this,
+				new GridBuilderParameters<Object>(new WrapAroundBorders(),
+						new SimpleGridAdder<Object>(), true, 135, 128));
+		
+		vegf = new GridValueLayer("Vegf", true, new WrapAroundBorders(), 135, 128);
+		diffuser = new ValueLayerDiffuser((IGridValueLayer)vegf, 1.0, 0.4, true);
+		this.addValueLayer(vegf);
+		
+		if( PanelStyle.startingLayout == "Load Template" ) {
+			loadTemplate(grid, this);
+			seedCellsBottom(grid, this);
+		}
+		else if( PanelStyle.startingLayout == "Make Template" ) {
+			makeTemplate(grid, this);
+			seedCellsBottom(grid, this);
+		}
+			
+		else if( PanelStyle.startingLayout == "Bottom to Top VEGF" ) {
+			makeUniformGradient(grid, this);
+			seedCellsBottom(grid, this);
+		}
+		
+		else {
+			makeRadialGradient(grid, this);
+			seedCellsMiddle(grid, this);
+		}
+		
+	}
+	
+	private void makeUniformGradient(Grid<Object> grid, Context<Object> context){
+
+		
+		
+		for (int i = 0; i<128; i++){
+			for (int j = 0; j<135; j++){
+				vegf.set(i*0.025, j, i);
+			}
+		}
+
+	}
+	
+	private void makeRadialGradient(Grid<Object> grid, Context<Object> context){
+		
+		
+		for (int i = 0; i<128; i++){
+			for (int j = 0; j<135; j++){
+				vegf.set(Math.sqrt(Math.pow(i-64,2) + Math.pow(j-67,2))*0.036, j, i);
+			}
+		}
+		
+	}
+	
+	private void makeTemplate(Grid<Object> grid, Context<Object> context) {
+		Parameters params = RunEnvironment.getInstance().getParameters();
+		
+		//Create astrocytes = number of starting branches at random x, y = 0
+		int branches = (Integer) params.getValue("startingBranches");
+		
+		List<GridPoint> reproducing = new ArrayList<GridPoint>();
+		
+		for (int k=0; k < branches; k++) {
+			Astrocyte astrocyte = new Astrocyte(grid);
+			context.add(astrocyte);
+			grid.moveTo(astrocyte, RandomHelper.nextIntFromTo(0, 135), 0);
+			GridPoint pt = grid.getLocation(astrocyte);
+			reproducing.add(new GridPoint(pt.getX(),pt.getY()));
+			vegf.set(3, pt.getX(),pt.getY());
+		}	
+		
+		//findEmptySites().isEmpty()
+		//for (int i = 0; i < reproducing.size(); i++) {
+		//	reproduce(grid, context);
+		//}
+			
+		
+	}
+	
+	private void loadTemplate(Grid<Object> grid, Context<Object> context) {
+		
+		String templateFile = "template_" + PanelStyle.startingTemplate + ".txt";
+		int counter = 0;
+		try {
+			Scanner scanner = new Scanner(new File(templateFile));
+			int[] xCor = new int[1500];
+			int[] yCor = new int[1500];
+			
+			while( scanner.hasNextInt() ) {
+				xCor [counter] = scanner.nextInt();
+				yCor [counter] = scanner.nextInt();
+				counter++;
+			}
+			
+			for( int i = 0; i < counter; i++) {
+				Astrocyte astrocyte = new Astrocyte(grid);
+				context.add(astrocyte);
+				grid.moveTo(astrocyte, xCor[i], yCor[i]);
+				vegf.set(1, xCor[i], yCor[i]);
+			}
+	
+			for( int i = 0; i < 5; i++) {
+				for (int j = 0; j < counter; j++ ) {
+					double val = vegf.get(xCor[j], yCor[j]);
+					vegf.set(val + 1, xCor[j], yCor[j]);
+				}
+				
+				for( int k = 0; k < 5; k++) {
+					diffuser.diffuse();
+				}
+			}
+			
+			System.out.format("You have loaded template number: %d \n", PanelStyle.startingTemplate);
+			scanner.close();
+		} catch (FileNotFoundException e) {
+			e.printStackTrace();
+		}	
+		
+	}
+
+	private void seedCellsBottom(Grid<Object> grid, Context<Object> context){
+		
+		if (PanelStyle.cellLayout == "ECs"){
+			
+			EcCount = 1;
+			
+			for (int a = 12; a<125; a = a+20){
+				for (int b = 5; b<26; b = b+10){
+					makeEC(grid, context, EcCount, a, b);
+					EcCount++;
+				}
+			}
+			
+			for (int a = 22; a<115; a = a+20){
+				for (int b = 10; b<21; b = b+10){
+					makeEC(grid, context, EcCount, a, b);
+					EcCount++;
+				}
+			}
+
+		}
+		
+		if (PanelStyle.cellLayout == "EC and PC"){
+			
+			EcCount = 1;
+			PcCount = 1;
+			
+			for (int a = 12; a<125; a = a+20){
+				for (int b = 5; b<26; b = b+10){
+					makeEC(grid, context, EcCount, a, b);
+					EcCount++;
+				}
+			}
+			
+			for (int a = 22; a<115; a = a+20){
+				for (int b = 10; b<21; b = b+10){
+					
+					int chance = (int)(100*Math.random());
+					
+					if (chance < 25){
+					makeEC(grid, context, EcCount, a, b);
+					EcCount++;
+					}
+					
+					else {
+						makePC(grid, context, PcCount, a, b);
+						PcCount++;
+					}
+				}
+			}
+		}
+		
+		if (PanelStyle.cellLayout == "Sparse EC"){
+			
+			EcCount = 1;
+			
+			for (int a = 12; a<125; a = a+20){
+				for (int b = 5; b<26; b = b+10){
+					makeEC(grid, context, EcCount, a, b);
+					EcCount++;
+				}
+			}
+			
+			for (int a = 22; a<115; a = a+20){
+				for (int b = 10; b<21; b = b+10){
+					
+					int chance = (int)(100*Math.random());
+					
+					if (chance < 25){
+					makeEC(grid, context, EcCount, a, b);
+					EcCount++;
+					}
+
+				}
+			}
+
+		}
+	}
+	
+	private void seedCellsMiddle(Grid<Object> grid, Context<Object> context){
+		
+		if (PanelStyle.cellLayout == "ECs"){
+			
+			EcCount = 1;
+			for (int a = 42; a<83; a = a+20){
+				for (int b = 39; b<80; b = b+10){
+					makeEC(grid, context, EcCount, a, b);
+					EcCount++;
+				}
+			}
+			
+			for (int a = 52; a<73; a = a+20){
+				for (int b = 44; b<75; b = b+10){
+					makeEC(grid, context, EcCount, a, b);
+					EcCount++;
+				}
+			}
+			
+			for (int a = 32; a<93; a = a+60){
+				for (int b = 54; b<65; b = b+10){
+					makeEC(grid, context, EcCount, a, b);
+					EcCount++;
+				}
+			}
+		}
+		
+		if (PanelStyle.cellLayout == "EC and PC"){
+			
+			EcCount = 1;
+			PcCount = 1;
+			
+			for (int a = 42; a<83; a = a+20){
+				for (int b = 39; b<80; b = b+10){
+					makeEC(grid, context, EcCount, a, b);
+					EcCount++;
+				}
+			}
+			
+			for (int a = 52; a<73; a = a+20){
+				for (int b = 44; b<75; b = b+10) {
+					int chance = (int)(100*Math.random());
+					if (chance < 25){
+						makeEC(grid, context, EcCount, a, b);
+						EcCount++;
+					}
+					else {
+						makePC(grid, context, PcCount, a, b);
+						PcCount++;
+					}
+				}
+			}
+			
+			for (int a = 32; a<93; a = a+60){
+				for (int b = 54; b<65; b = b+10){
+					int chance = (int)(100*Math.random());	
+					if (chance < 25){
+						makeEC(grid, context, EcCount, a, b);
+						EcCount++;
+					}
+					else {
+						makePC(grid, context, PcCount, a, b);
+						PcCount++;
+					}
+				}
+			}
+		}
+		
+		if (PanelStyle.cellLayout == "Sparse EC"){
+			EcCount = 1;
+			for (int a = 42; a<83; a = a+20){
+				for (int b = 39; b<80; b = b+10){
+					makeEC(grid, context, EcCount, a, b);
+					EcCount++;
+				}
+			}
+			
+			for (int a = 52; a<73; a = a+20){
+				for (int b = 44; b<75; b = b+10){	
+					int chance = (int)(100*Math.random());
+					if (chance < 25) {
+						makeEC(grid, context, EcCount, a, b);
+						EcCount++;
+					}
+				}
+			}
+		
+		for (int a = 32; a<93; a = a+60) {
+			for (int b = 54; b<65; b = b+10) {
+				int chance = (int)(100*Math.random());
+				if (chance < 25){
+					makeEC(grid, context, EcCount, a, b);
+					EcCount++;
+				}
+			}
+		}
+	}
+	}
+	
+	private void makeEC(Grid<Object> grid, Context<Object> context, int cellCount, int a, int b){
+		for (int i = a; i<(a+10); i++) {
+			for (int j = b; j<(b+10); j++){
+				EndothelialCell EC = new EndothelialCell(grid);
+				context.add(EC);
+				EC.setEcCount(cellCount);
+				grid.moveTo(EC, i, j);
+			}
+		}
+	}
+	
+	private void makePC(Grid<Object> grid, Context<Object> context, int cellCount, int a, int b){
+		for (int i = a; i<(a+10); i++) {
+			for (int j = b; j<(b+10); j++){
+				Pericyte PC = new Pericyte(grid);
+				context.add(PC);
+				PC.setPcCount(cellCount);
+				grid.moveTo(PC, i, j);
+			}
+		}
+	}
+	
+	
+	@ScheduledMethod(start = 1, interval = 1) 
+	public void go() {
+
+		Grid<Object> grid = (Grid) this.getProjection("grid");
+		
+		makeGradient(grid);
+
+
+		
+		// integer i is the current cell
+		// every time step, set the leading edge and move each cell
+		
+		for(int i = 0; i < EcCount; i++) {
+			Object[] leadingEdge = setLeadingEdge(grid, i);
+			
+			if( leadingEdge != null) {
+				
+				findDestination(grid, i, leadingEdge);
+				findOrigin(grid, i, leadingEdge);
+				swapPatches(grid);
+			}
+			leadingEdge = null;				
+		}
+		
+		for( int i = 0; i < PcCount; i++) {
+			maintainCellContacts(grid, i);
+		}
+
+		
+	}
+	
+	public void makeGradient(Grid<Object> grid){
+		
+		if( PanelStyle.startingLayout == "Load Template" || PanelStyle.startingLayout == "Make Template" ){
+			for (Object object:this.getObjects(Astrocyte.class)){
+				GridPoint location = grid.getLocation(object);
+				double val = vegf.get(location.getX(), location.getY());
+				vegf.set(val+1, location.getX(), location.getY());
+				
+				for (int i = 0; i<5; i++){
+					diffuser.diffuse();
+				}
+			}
+				
+				for (int i = 0; i<128; i++){
+					for (int j = 0; j<135; j++){
+						double val = vegf.get(j, i);
+						
+						if(val>0){
+							double dVEGF = -val*0.001;
+							vegf.set(val+dVEGF, j, i);
+						}
+					}
+				}
+			}
+		
+		else {
+			for (int i = 0; i<128; i++){
+				for (int j = 0; j<135; j++){
+					double val = vegf.get(j, i);
+					double dVEGF = -val*0.001; //VEGF soluble degradation rate
+					vegf.set(val+1+dVEGF, j, i);
+				}
+			}
+			
+		}
+	}
+	public Object[] setLeadingEdge(Grid<Object> grid, int EcCount) {
+		
+		//create an object array called leading edge to hold agents that are part of the leading cell
+		Object[] leadingEdge = new Object[160];
+		
+		int currentCell = 0;
+		
+		//Obtain every agent that is part of the EC cell class
+		for(Object object: this.getObjects(EndothelialCell.class) ){
+			EndothelialCell cell = (EndothelialCell)object;
+			
+			//Only run for the agents part of the current cell
+			if(cell.getEcCount() == EcCount) {
+				
+				//Moore Query creates a list of the moore neighborhood for the cell
+				MooreQuery<Object> query = new MooreQuery<>(grid, cell, 1, 1);
+				Iterator<Object> iterator = query.query().iterator();
+				int sameCellCount = 0;
+				int neighborsCount = 0;
+				
+				//Check every neighborhood cell
+				//Looking for number of neighbors that are part of the same cell
+				//Leading edge also defined by agents next to empty space
+				while( iterator.hasNext() ) {
+					Object o = iterator.next();
+					
+					//Ignore any members of the astrocyte class
+					if( o.getClass() == Astrocyte.class && iterator.hasNext() )
+						o = iterator.next();
+				
+					//If agent is member of EC cell
+					if( o.getClass() == cell.getClass() ) {
+						EndothelialCell sameCell = (EndothelialCell)o;
+						if(sameCell.getEcCount() == cell.getEcCount() )
+							sameCellCount++;
+					}
+					neighborsCount++;
+				}
+				
+				//If both conditions are met, the cell is added to the leading edge
+				if( sameCellCount > 4 && neighborsCount < 8) {
+					leadingEdge[currentCell] = cell;
+					currentCell++;
+				}
+			}
+		}
+		return leadingEdge;
+	}
+	
+	public void findDestination(Grid<Object> grid, int EcCount, Object[] leadingEdge) {
+		
+		double maxVEGF = 0;
+		double thisVEGF = 0;
+		
+		//Run through for every object member of the EC class
+		for(Object object: this.getObjects(EndothelialCell.class) ) {		
+				EndothelialCell cell = (EndothelialCell)object;
+				
+				//Check to see if agent is member of current cell
+				if (cell.getEcCount() == EcCount) {
+					
+					// Compare current cell against leading edge to see if it is a member of the leading edge
+					for( Object thisEdge: leadingEdge) {
+						if( cell == thisEdge) {
+										
+							GridPoint point = grid.getLocation(cell);
+							
+							//Manually check moore neighborhood
+							for( int x = point.getX() - 1; x <= point.getX() + 1; x++) {
+								for( int y = point.getY() - 1; y <= point.getY() + 1; y++) {
+									Object checkCells = grid.getObjectAt(x, y);
+									Iterable<Object> iterable = grid.getObjectsAt(x, y);
+									Iterator<Object> iterator = iterable.iterator();
+									Object checkCell = null;
+									int numObjects = 0;
+									while( iterator.hasNext() ) {
+										checkCell = iterator.next();
+										numObjects++;
+										
+									}
+									
+									//If no objects are present, then the space is open and obtain the vegf at the location
+									if( numObjects == 0) {
+										thisVEGF = vegf.get(x, y);
+										
+										//Cells move toward patches of greatest VEGF
+										//If this open patch has the greatest VEGF of the leading edge,
+										//Then the patch becomes the destination
+										if( thisVEGF > maxVEGF) {
+											maxVEGF = thisVEGF;
+											GridPoint destination = new GridPoint(x, y);
+											AngioContextBuilder.destination = destination;
+										}
+									}
+									
+									//Check if the object is a astrocyte - Only needed for load template setup
+									//If it is, then treat the patch as an open space
+									else if( numObjects == 1) {
+										if( checkCell.getClass() == Astrocyte.class) {
+											thisVEGF = vegf.get(x, y);
+											if( thisVEGF > maxVEGF) {
+												maxVEGF = thisVEGF;
+												GridPoint destination = new GridPoint(x, y);
+												AngioContextBuilder.destination = destination;
+											}
+										}
+									}
+								}
+							}				
+						}
+					} 
+				}
+			} 
+	}
+	
+	public void findOrigin(Grid<Object> grid, int EcCount, Object[] leadingEdge) {
+		
+		double maxDistance = 0;
+		double thisDistance = 0;
+		for(Object object: this.getObjects(EndothelialCell.class) ) {
+			EndothelialCell cell = (EndothelialCell)object;
+						
+			if(cell.getEcCount() == EcCount) {
+				
+				GridPoint location = grid.getLocation(cell);
+				GridPoint destination = AngioContextBuilder.destination;
+		
+				double x = destination.getX();
+				double y = destination.getY();
+				thisDistance = Math.sqrt(Math.pow(x - location.getX(), 2) + Math.pow(y - location.getY(), 2));
+				
+				if( thisDistance > maxDistance) {
+					maxDistance = thisDistance;
+					AngioContextBuilder.origin = cell;
+				}	
+			} 	
+		}	
+	}
+	
+	public void swapPatches(Grid<Object> grid) {
+		GridPoint destination = AngioContextBuilder.destination;
+		EndothelialCell cell = AngioContextBuilder.origin;
+		
+		
+		try {
+			grid.moveTo(cell, destination.getX(), destination.getY());
+		} catch( NullPointerException e) {
+			System.out.println("Null Pointer Exception");
+		}
+	}
+	
+	public void maintainCellContacts(Grid<Object> grid, int PcCount) {
+		
+		//Pass by reference the current cell PcCount
+		Set<Object> leadingEdge = new HashSet<Object>();
+		Set<Integer> listOfContacts = new HashSet<Integer>();
+		int contacts = 0;
+		
+		//Filter through every PC for agents part of the current cell
+		for( Object object: this.getObjects(Pericyte.class)) {
+			
+			Pericyte cell = (Pericyte) object;
+			
+			if( cell.getPcCount() == PcCount) {
+				
+				MooreQuery<Object> query = new MooreQuery<>(grid, cell, 1, 1);
+				Iterator<Object> iterator = query.query().iterator();
+				
+				//Filter through the neighborhood of each agent in the cell
+				while( iterator.hasNext() ) {
+					Object o = iterator.next();
+					
+					//If the neighbor cell is an EC, add its EC number to the list of contacts
+					//add the PC to the leading edge
+					if( o.getClass() == EndothelialCell.class) {
+						EndothelialCell neighbor = (EndothelialCell) o;
+						leadingEdge.add(cell);
+						listOfContacts.add(neighbor.getEcCount());
+					}
+				}
+				
+				//Filter through agents in the leadingEdge
+				//Count number of agents that are in contact with the specified EC cell
+				Iterator<Integer> contactsList = listOfContacts.iterator();
+				Iterator<Object> objectsList = leadingEdge.iterator();
+				
+				while( contactsList.hasNext() ) {
+					int neighborEC = contactsList.next();
+				}
+				
+			}
+			
+		}
+	}
+	
+	
+}
